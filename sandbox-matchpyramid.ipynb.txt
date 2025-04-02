@@ -1,0 +1,655 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "%load_ext autoreload\n",
+    "%autoreload 2"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [],
+   "source": [
+    "from __future__ import print_function\n",
+    "import argparse\n",
+    "import torch\n",
+    "import torch.nn as nn\n",
+    "import torch.nn.functional as F\n",
+    "import torch.optim as optim\n",
+    "from importlib import reload "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from deeprank.dataset import DataLoader, PairGenerator, ListGenerator\n",
+    "from deeprank import utils"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "<torch._C.Generator at 0x7f0c140beb10>"
+      ]
+     },
+     "execution_count": 4,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "seed = 1234\n",
+    "torch.manual_seed(seed)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "[./data/letor/r5w/word_dict.txt]\n",
+      "\tWord dict size: 193367\n",
+      "[./data/letor/r5w/qid_query.txt]\n",
+      "\tData size: 1692\n",
+      "[./data/letor/r5w/docid_doc.txt]\n",
+      "\tData size: 65323\n",
+      "[./data/letor/r5w/embed_wiki-pdc_d50_norm]\n",
+      "\tEmbedding size: 109282\n",
+      "Generate numpy embed: (193368, 50)\n"
+     ]
+    }
+   ],
+   "source": [
+    "loader = DataLoader('./config/letor07_mp_fold1.model')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import json\n",
+    "letor_config = json.loads(open('./config/letor07_mp_fold1.model').read())\n",
+    "#device = torch.device(\"cuda\")\n",
+    "device = torch.device(\"cpu\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "[./data/letor/r5w/relation.train.fold1.txt]\n",
+      "\tInstance size: 47828\n",
+      "Pair Instance Count: 325439\n"
+     ]
+    }
+   ],
+   "source": [
+    "Letor07Path = letor_config['data_dir']\n",
+    "\n",
+    "letor_config['fill_word'] = loader._PAD_\n",
+    "letor_config['embedding'] = loader.embedding\n",
+    "letor_config['feat_size'] = loader.feat_size\n",
+    "letor_config['vocab_size'] = loader.embedding.shape[0]\n",
+    "letor_config['embed_dim'] = loader.embedding.shape[1]\n",
+    "letor_config['pad_value'] = loader._PAD_\n",
+    "\n",
+    "pair_gen = PairGenerator(rel_file=Letor07Path + '/relation.train.fold%d.txt'%(letor_config['fold']), \n",
+    "                         config=letor_config)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from deeprank import select_module\n",
+    "from deeprank import rank_module"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "letor_config['q_limit'] = 20\n",
+    "letor_config['d_limit'] = 2000\n",
+    "select_net = select_module.IdentityNet(config=letor_config)\n",
+    "select_net.train()\n",
+    "select_net = select_net.to(device)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "\"\\nletor_config['q_limit'] = 20\\nletor_config['d_limit'] = 500\\nletor_config['max_match'] = 5\\nletor_config['win_size'] = 5\\nselect_net = select_module.QueryCentricNet(config=letor_config)\\nselect_net.train()\\nselect_net = select_net.to(device)\\n\""
+      ]
+     },
+     "execution_count": 10,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "'''\n",
+    "letor_config['q_limit'] = 20\n",
+    "letor_config['d_limit'] = 500\n",
+    "letor_config['max_match'] = 5\n",
+    "letor_config['win_size'] = 5\n",
+    "select_net = select_module.QueryCentricNet(config=letor_config)\n",
+    "select_net.train()\n",
+    "select_net = select_net.to(device)\n",
+    "'''"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "\"\\nletor_config['q_limit'] = 20\\nletor_config['d_limit'] = 500\\nletor_config['max_match'] = 20\\nletor_config['win_size'] = 5\\nletor_config['finetune_embed'] = False\\nselect_net = select_module.PointerNet(config=letor_config)\\nselect_net.train()\\nselect_net = select_net.to(device)\\n\""
+      ]
+     },
+     "execution_count": 11,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "'''\n",
+    "letor_config['q_limit'] = 20\n",
+    "letor_config['d_limit'] = 500\n",
+    "letor_config['max_match'] = 20\n",
+    "letor_config['win_size'] = 5\n",
+    "letor_config['finetune_embed'] = False\n",
+    "select_net = select_module.PointerNet(config=letor_config)\n",
+    "select_net.train()\n",
+    "select_net = select_net.to(device)\n",
+    "'''"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# letor_config['simmat_channel'] = 1\n",
+    "# letor_config['conv_params'] = [(8, 2, 10)]\n",
+    "# letor_config['fc_params'] = [50]\n",
+    "# letor_config['dpool_size'] = [3, 10]\n",
+    "# letor_config['lr'] = 0.001\n",
+    "# letor_config['finetune_embed'] = False\n",
+    "# rank_net = rank_module.MatchPyramidNet(config=letor_config)\n",
+    "# rank_net.embedding.weight.data.copy_(torch.from_numpy(loader.embedding))\n",
+    "# rank_net.train()\n",
+    "# optimizer = optim.Adam(rank_net.parameters(), lr=letor_config['lr'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 13,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# letor_config['simmat_channel'] = 1\n",
+    "# letor_config['conv_params'] = [(8, 3, 3)]\n",
+    "# letor_config['fc_params'] = [200]\n",
+    "# letor_config['dpool_size'] = [3, 10]\n",
+    "# letor_config['lr'] = 0.001\n",
+    "# letor_config['finetune_embed'] = False\n",
+    "# rank_net = rank_module.MatchPyramidNet(config=letor_config)\n",
+    "# rank_net = rank_net.to(device)\n",
+    "# rank_net.embedding.weight.data.copy_(torch.from_numpy(loader.embedding))\n",
+    "# rank_net.train()\n",
+    "# optimizer = optim.Adam(rank_net.parameters(), lr=letor_config['lr'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 14,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "letor_config['simmat_channel'] = 1\n",
+    "letor_config['conv_params'] = [(8, 5, 5)]\n",
+    "letor_config['fc_params'] = []\n",
+    "letor_config['dpool_size'] = [3, 10]\n",
+    "letor_config['lr'] = 0.005\n",
+    "letor_config['finetune_embed'] = False\n",
+    "rank_net = rank_module.MatchPyramidNet(config=letor_config)\n",
+    "rank_net = rank_net.to(device)\n",
+    "rank_net.embedding.weight.data.copy_(torch.from_numpy(loader.embedding))\n",
+    "rank_net.train()\n",
+    "optimizer = optim.Adam(rank_net.parameters(), lr=letor_config['lr'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 15,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def to_device(*variables):\n",
+    "    return (torch.from_numpy(variable).to(device) for variable in variables)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 16,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def show_text(x):\n",
+    "    print(' '.join([loader.word_dict[w.item()] for w in x]))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# X1, X1_len, X1_id, X2, X2_len, X2_id, Y, F = \\\n",
+    "#         pair_gen.get_batch(data1=loader.query_data, data2=loader.doc_data)\n",
+    "# X1, X1_len, X2, X2_len, Y, F = \\\n",
+    "#         to_device(X1, X1_len, X2, X2_len, Y, F)\n",
+    "# show_text(X2[0])\n",
+    "# X1, X2_new, X1_len, X2_len_new = select_net(X1, X2, X1_len, X2_len, X1_id, X2_id)\n",
+    "# show_text(X1[0])\n",
+    "# for i in range(5):\n",
+    "#     print(i, end=' ')\n",
+    "#     show_text(X2_new[0][i])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 18,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# X1 = X1[:1]\n",
+    "# X1_len = X1_len[:1]\n",
+    "# X2 = X2[:1]\n",
+    "# X2_len = X2_len[:1]\n",
+    "# X1_id = X1_id[:1]\n",
+    "# X2_id = X2_id[:1]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 19,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# show_text(X2[0])\n",
+    "# X1, X2_new, X1_len, X2_len_new = select_net(X1, X2, X1_len, X2_len, X1_id, X2_id)\n",
+    "# show_text(X1[0])\n",
+    "# for i in range(5):\n",
+    "#     print(i, end=' ')\n",
+    "#     show_text(X2_new[0][i])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 25,
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "0.6815898418426514\n",
+      "0.7567062973976135\n",
+      "0.5823414325714111\n",
+      "0.6476808190345764\n",
+      "0.6902686953544617\n",
+      "0.6790058612823486\n",
+      "0.681659460067749\n",
+      "0.7014361619949341\n",
+      "0.7053287029266357\n",
+      "0.6592481732368469\n",
+      "0.8288141489028931\n",
+      "0.6558957099914551\n",
+      "0.7498481869697571\n",
+      "0.7479518055915833\n",
+      "0.6230575442314148\n",
+      "0.6434897780418396\n",
+      "0.6039712429046631\n",
+      "0.7449009418487549\n",
+      "0.7565931081771851\n",
+      "0.6968901753425598\n",
+      "0.7935071587562561\n",
+      "0.7211249470710754\n",
+      "0.7040175795555115\n",
+      "0.848415195941925\n",
+      "0.670654296875\n",
+      "0.7028505206108093\n",
+      "0.7429744005203247\n",
+      "0.7004295587539673\n",
+      "0.6932598352432251\n",
+      "0.7012687921524048\n",
+      "0.7168188691139221\n",
+      "0.5549314022064209\n",
+      "0.7361621260643005\n",
+      "0.7696697115898132\n",
+      "0.6200156807899475\n",
+      "0.7413567900657654\n",
+      "0.6220021843910217\n",
+      "0.7573643326759338\n",
+      "0.7620742917060852\n",
+      "0.7095494866371155\n",
+      "0.7490368485450745\n",
+      "0.7285387516021729\n",
+      "0.7047562599182129\n",
+      "0.6245677471160889\n",
+      "0.6817363500595093\n",
+      "0.6705864667892456\n",
+      "0.6920755505561829\n",
+      "0.7058682441711426\n",
+      "0.6893578171730042\n",
+      "0.7598142027854919\n",
+      "0.6605805158615112\n",
+      "0.7184637188911438\n",
+      "0.7094810605049133\n",
+      "0.7001588344573975\n",
+      "0.7883154153823853\n",
+      "0.5997823476791382\n",
+      "0.6822267174720764\n",
+      "0.6061837077140808\n",
+      "0.6900763511657715\n",
+      "0.8336097598075867\n",
+      "0.6589494943618774\n",
+      "0.7657971382141113\n",
+      "0.6722813248634338\n",
+      "0.6475604176521301\n",
+      "0.713114857673645\n",
+      "0.6832880973815918\n",
+      "0.7996314764022827\n",
+      "0.6570541858673096\n",
+      "0.798801064491272\n",
+      "0.6744362115859985\n",
+      "0.7496570348739624\n",
+      "0.71578049659729\n",
+      "0.7030064463615417\n",
+      "0.7752085328102112\n",
+      "0.7139051556587219\n",
+      "0.6711647510528564\n",
+      "0.6495658159255981\n",
+      "0.6277160048484802\n",
+      "0.8283296227455139\n",
+      "0.5902372002601624\n",
+      "0.7102846503257751\n",
+      "0.6501513719558716\n",
+      "0.5653447508811951\n",
+      "0.5959188938140869\n",
+      "0.8149831891059875\n",
+      "0.606103777885437\n",
+      "0.7381307482719421\n",
+      "0.6994138360023499\n",
+      "0.8363919854164124\n",
+      "0.5942649245262146\n",
+      "0.5845585465431213\n",
+      "0.5650575160980225\n",
+      "0.7018755078315735\n",
+      "0.5654187798500061\n",
+      "0.8384092450141907\n",
+      "0.6848174929618835\n",
+      "0.7038249969482422\n",
+      "0.5816043019294739\n",
+      "0.6890252828598022\n",
+      "0.6527910828590393\n",
+      "0.6306727528572083\n",
+      "0.6322551965713501\n",
+      "0.800815224647522\n",
+      "0.7513061761856079\n",
+      "0.6377823352813721\n",
+      "0.6708831191062927\n",
+      "0.636202871799469\n",
+      "0.6816084980964661\n",
+      "0.5937047004699707\n",
+      "0.608971357345581\n",
+      "0.7013978362083435\n",
+      "0.7072219848632812\n",
+      "0.6677017211914062\n",
+      "0.6486200094223022\n",
+      "0.7874672412872314\n",
+      "0.5865769386291504\n",
+      "0.6488713026046753\n",
+      "0.7315837144851685\n",
+      "0.7342674732208252\n",
+      "0.6354228854179382\n",
+      "0.7780167460441589\n",
+      "0.6985815167427063\n",
+      "0.5863333344459534\n",
+      "0.6670823097229004\n",
+      "0.7196681499481201\n",
+      "0.7370169758796692\n",
+      "0.7352192401885986\n",
+      "0.6207921504974365\n",
+      "0.7143492102622986\n",
+      "0.6141763925552368\n",
+      "0.7149505019187927\n",
+      "0.7423879504203796\n",
+      "0.7422605752944946\n",
+      "0.7449274659156799\n",
+      "0.6143163442611694\n",
+      "0.6487647891044617\n",
+      "0.7078669667243958\n",
+      "0.5854126214981079\n",
+      "0.690379798412323\n",
+      "0.717632532119751\n",
+      "0.6494232416152954\n",
+      "0.6290546655654907\n",
+      "0.8095639944076538\n",
+      "0.7755551338195801\n",
+      "0.7009062767028809\n",
+      "0.8580253720283508\n",
+      "0.7277355194091797\n",
+      "0.8175618052482605\n",
+      "0.635073184967041\n",
+      "0.6960949897766113\n",
+      "Time Cost: 425.8214509487152 s\n"
+     ]
+    }
+   ],
+   "source": [
+    "import time\n",
+    "start_t = time.time()\n",
+    "for i in range(150):\n",
+    "    X1, X1_len, X1_id, X2, X2_len, X2_id, Y, F = \\\n",
+    "        pair_gen.get_batch(data1=loader.query_data, data2=loader.doc_data)\n",
+    "    X1, X1_len, X2, X2_len, Y, F = \\\n",
+    "        to_device(X1, X1_len, X2, X2_len, Y, F)\n",
+    "    X1, X2, X1_len, X2_len = select_net(X1, X2, X1_len, X2_len, X1_id, X2_id)\n",
+    "    X2, X2_len = utils.data_adaptor(X2, X2_len, select_net, rank_net, letor_config)\n",
+    "    output = rank_net(X1, X2, X1_len, X2_len, 0)\n",
+    "    loss = rank_net.pair_loss(output, Y)\n",
+    "    print(loss.item())\n",
+    "    optimizer.zero_grad()\n",
+    "    loss.backward()\n",
+    "    optimizer.step()\n",
+    "end_t = time.time()\n",
+    "print('Time Cost: %s s' % (end_t-start_t))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 26,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "torch.save(select_net.state_dict(), \"identity.ckpt\")\n",
+    "torch.save(rank_net.state_dict(), \"matchpyramid.ckpt\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 27,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "torch.save(select_net, \"identity.model\")\n",
+    "torch.save(rank_net, \"matchpyramid.model\")"
+   ]
+  },
+  {
+   "cell_type": "raw",
+   "metadata": {},
+   "source": [
+    "GPU v0: Time Cost: 93.18958330154419 s\n",
+    "GPU v1: Time Cost: 70.9958758354187 s\n",
+    "---\n",
+    "CPU v0: Time Cost: 22.77282667160034 s\n",
+    "CPU v0 v1: Time Cost: 34.77551507949829 s\n",
+    "CPU v1: Time Cost: 74.07408261299133 s\n",
+    "CPU v2: Time Cost: 51.10329461097717 s"
+   ]
+  },
+  {
+   "cell_type": "raw",
+   "metadata": {},
+   "source": [
+    "GPU Time Cost: 105.99338483810425 s\n",
+    "CPU Time Cost: 28.412545680999756 s"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 28,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "MatchPyramidNet(\n",
+       "  (embedding): Embedding(193368, 50, padding_idx=193367)\n",
+       "  (conv_sequential): Sequential(\n",
+       "    (0): Conv2d(1, 8, kernel_size=[5, 5], stride=(1, 1), padding=[2, 2])\n",
+       "  )\n",
+       "  (dpool_layer): AdaptiveMaxPool2d(output_size=[3, 10])\n",
+       "  (fc_sequential): Sequential()\n",
+       "  (out_layer): Linear(in_features=240, out_features=1, bias=True)\n",
+       ")"
+      ]
+     },
+     "execution_count": 28,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "rank_net"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 29,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "[./data/letor/r5w/relation.test.fold1.txt]\n",
+      "\tInstance size: 13652\n",
+      "List Instance Count: 336\n",
+      "[Test] 0.4388468955781538\n"
+     ]
+    }
+   ],
+   "source": [
+    "select_net_e = torch.load(f='identity.model')\n",
+    "rank_net_e = torch.load(f='matchpyramid.model')\n",
+    "\n",
+    "list_gen = ListGenerator(rel_file=Letor07Path+'/relation.test.fold%d.txt'%(letor_config['fold']),\n",
+    "                         config=letor_config)\n",
+    "map_v = 0.0\n",
+    "map_c = 0.0\n",
+    "\n",
+    "with torch.no_grad():\n",
+    "    for X1, X1_len, X1_id, X2, X2_len, X2_id, Y, F in \\\n",
+    "        list_gen.get_batch(data1=loader.query_data, data2=loader.doc_data):\n",
+    "        #print(X1.shape, X2.shape, Y.shape)\n",
+    "        X1, X1_len, X2, X2_len, Y, F = to_device(X1, X1_len, X2, X2_len, Y, F)\n",
+    "        X1, X2, X1_len, X2_len = select_net_e(X1, X2, X1_len, X2_len, X1_id, X2_id)\n",
+    "        X2, X2_len = utils.data_adaptor(X2, X2_len, select_net, rank_net, letor_config)\n",
+    "        #print(X1.shape, X2.shape, Y.shape)\n",
+    "        pred = rank_net_e(X1, X2, X1_len, X2_len, 0)\n",
+    "        map_o = utils.eval_MAP(pred.tolist(), Y.tolist())\n",
+    "        #print(pred.shape, Y.shape)\n",
+    "        map_v += map_o\n",
+    "        map_c += 1.0\n",
+    "    map_v /= map_c\n",
+    "\n",
+    "print('[Test]', map_v)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "nips",
+   "language": "python",
+   "name": "nips"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.6.2"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}
